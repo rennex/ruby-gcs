@@ -173,23 +173,27 @@ module GCS
 
       def initialize(files)
         @streams = files.map {|f| f.each }
-        @values = @streams.map {|s| s.next }
+        @values = @streams.each_with_index.map {|s, i| [s.next, i] }
+        @values.sort!
       end
 
       def each
         while @values.any?
-          value, pos = @values.each_with_index.min
+          value, pos = @values.shift
           # take the next value to replace the one we took
-          begin
+          while pos
             begin
-              @values[pos] = @streams[pos].next
+              @values << [@streams[pos].next, pos]
+              @values.sort!
+
             rescue StopIteration
-              # when a stream ends, remove it from the arrays
-              @values.slice! pos
-              @streams.slice! pos
+              # when a stream ends, it won't get added back to @values
+              # so it will get ignored from now on
             end
-            # now also replace any duplicates of our value
-          end while pos = @values.index(value)
+
+            # now also replace any duplicates of our value by looping back
+            pos = (@values.first[0] == value ? @values.shift[1] : nil) rescue nil
+          end
 
           yield value
         end
