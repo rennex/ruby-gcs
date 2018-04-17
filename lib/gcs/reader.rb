@@ -103,14 +103,30 @@ module GCS
       @io.seek(pos)
 
       while last < h
-        while @io.read_bit == 1
-          last += @p
-        end
-
-        last += @io.read_bits(@log2p)
+        last = nextval(last)
       end
 
       last == h
     end
+
+    def each
+      return enum_for(:each) unless block_given?
+      val = 0
+      @io.seek(0)
+
+      @n.times do
+        val = nextval(val)
+        yield val
+      end
+    end
+
+   private
+    def nextval(val)
+      while @io.read_bit == 1
+        val += @p
+      end
+      val + @io.read_bits(@log2p)
+    end
+
   end
 end
