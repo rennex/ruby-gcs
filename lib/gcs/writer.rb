@@ -45,13 +45,22 @@ module GCS
       @values.sort!
       @values.uniq!
 
+      encode_and_write(@values)
+
+      @values.clear
+      true
+    end
+
+    private
+
+    def encode_and_write(values)
       index = []
       encoder = GolombEncoder.new(@io, @p)
 
       bits_written = 0
       last = 0
       diff = 0
-      @values.each_with_index do |v, i|
+      values.each_with_index do |v, i|
         diff = v - last
         last = v
 
@@ -73,9 +82,6 @@ module GCS
       @io.write([@n, @p, end_of_data, index.size].pack('Q>4'))
       @io.write(GCS_MAGIC)
       @io.close
-      @values.clear
-
-      true
     end
   end
 end
