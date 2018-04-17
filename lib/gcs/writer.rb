@@ -179,12 +179,18 @@ module GCS
 
       def each
         while @values.any?
-          value, pos = @values.shift
+          value, stream = @values.shift
           # take the next value to replace the one we took
-          while pos
+          while stream
             begin
-              @values << [@streams[pos].next, pos]
-              @values.sort!
+              newval = @streams[stream].next
+              # find the right spot where to insert it
+              newpos = @values.find_index {|v| v[0] > newval}
+              if newpos
+                @values.insert(newpos, [newval, stream])
+              else
+                @values << [newval, stream]
+              end
 
             rescue StopIteration
               # when a stream ends, it won't get added back to @values
@@ -192,12 +198,13 @@ module GCS
             end
 
             # now also replace any duplicates of our value by looping back
-            pos = (@values.first[0] == value ? @values.shift[1] : nil) rescue nil
+            stream = (@values.first[0] == value ? @values.shift[1] : nil) rescue nil
           end
 
           yield value
         end
       end
+
     end
 
   end
