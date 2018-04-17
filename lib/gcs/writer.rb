@@ -37,15 +37,21 @@ module GCS
       @values << value
     end
 
-    def finish
+    def finish(out = nil)
       @n = @values.size
       np = @n * @p
 
+      out.puts "Normalising..." if out
       @values.map! {|v| v % np}
+
+      out.puts "Sorting..." if out
       @values.sort!
+
+      out.puts "Removing duplicates..." if out
       @values.uniq!
 
-      encode_and_write(@values)
+      out.puts "Encoding..." if out
+      encode_and_write(@values, out)
 
       @values.clear
       true
@@ -53,7 +59,7 @@ module GCS
 
     private
 
-    def encode_and_write(values)
+    def encode_and_write(values, out)
       index = []
       encoder = GolombEncoder.new(@io, @p)
 
@@ -68,6 +74,7 @@ module GCS
 
         if @index_granularity > 0 && i > 0 && i % @index_granularity == 0
           index << [v, bits_written]
+          out.puts "Encoded #{i}..." if out && i % (1000*@index_granularity) == 0
         end
       end
 
@@ -84,4 +91,111 @@ module GCS
       @io.close
     end
   end
+
+  class LargeWriter < Writer
+    def initialize(io, fp, n)
+      super(io, fp)
+      @n = n
+      @np = fp*n
+      @tmp_path = "#{io.path}.%03d.tmp"
+      @tmp_files = []
+    end
+
+    def <<(value)
+      @values << value % @np
+      # when we've collected enough values, save them to a tempfile
+      if @values.size >= 5_000_000
+        finish_section()
+      end
+    end
+
+    def finish_section
+      return if @values.empty?
+      puts "Writing #{@values.size} values to a new temporary file"
+
+      @values.sort!
+      @values.uniq!
+
+      tmpfile = TempFile.new(@tmp_path % (@tmp_files.count + 1))
+      @tmp_files << tmpfile
+
+      # write the values as binary data in suitable chunks
+      @values.each_slice(100_000) do |chunk|
+        tmpfile.write(chunk)
+      end
+
+      @values.clear
+    end
+
+    def finish(out = nil)
+      finish_section
+
+      encode_and_write(SortedStreamMerger.new(@tmp_files), out)
+
+      # close the tempfiles
+      @tmp_files.each do |f|
+        f.close
+        # TODO: delete them
+      end
+      @tmp_files.clear
+
+      true
+    end
+
+    class TempFile
+      def initialize(filename)
+        @file = File.open(filename, "r+") rescue File.open(filename, "w+")
+      end
+
+      def write(values)
+        @file.write(values.pack("Q*"))
+      end
+
+      def close
+        @file.close
+      end
+
+      def each
+        return enum_for(:each) unless block_given?
+
+        file = @file.dup
+        file.rewind
+        while !file.eof?
+          file.read(8*10_000).unpack("Q*").each do |val|
+            yield val
+          end
+        end
+      end
+    end
+
+    class SortedStreamMerger
+      include Enumerable
+
+      def initialize(files)
+        @streams = files.map {|f| f.each }
+        @values = @streams.map {|s| s.next }
+      end
+
+      def each
+        while @values.any?
+          value, pos = @values.each_with_index.min
+          # take the next value to replace the one we took
+          begin
+            begin
+              @values[pos] = @streams[pos].next
+            rescue StopIteration
+              # when a stream ends, remove it from the arrays
+              @values.slice! pos
+              @streams.slice! pos
+            end
+            # now also replace any duplicates of our value
+          end while pos = @values.index(value)
+
+          yield value
+        end
+      end
+    end
+
+  end
+
 end

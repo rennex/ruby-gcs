@@ -5,23 +5,44 @@ require "gcs"
 
 require 'digest/sha1'
 
-if ARGV.size != 3
-  abort("Usage: #{$0} FPRATE INFILE OUTFILE")
+debug = ARGV.delete "resume"
+
+unless ARGV.size.between?(3, 4)
+  abort("Usage: #{$0} FPRATE INFILE OUTFILE [LINECOUNT] [resume]")
 end
 
 fp = Integer(ARGV.shift)
 infile = File.new(ARGV.shift)
 outfile = File.new(ARGV.shift, 'w')
+n = Integer(ARGV.shift) rescue nil
 
-gcs = GCS::Writer.new(outfile, fp)
+if n
+  gcs = GCS::LargeWriter.new(outfile, fp, n)
+else
+  gcs = GCS::Writer.new(outfile, fp)
+end
 p gcs
 
-infile.each_line.with_index do |line, i|
-  h = Digest::SHA1.hexdigest(line.chomp)[0,16].to_i(16)
-  gcs << h
+if debug
+  # resume reading the previously created tempfiles
+  gcs.instance_eval do
+    begin
+      loop.with_index do |_, i|
+        @tmp_files << GCS::LargeWriter::TempFile.new(@tmp_path % (@tmp_files.count + 1))
+      end
+    rescue
+    end
+  end
 
-  if i % 1_000_000 == 0
-    puts "#{i}..."
+else
+  infile.each_line.with_index do |line, i|
+    h = Digest::SHA1.hexdigest(line.chomp)[0,16].to_i(16)
+    gcs << h
+
+    if i % 1_000_000 == 0
+      puts "#{i}..."
+    end
   end
 end
-gcs.finish
+
+gcs.finish(STDOUT)
