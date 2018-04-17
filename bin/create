@@ -26,11 +26,10 @@ p gcs
 if debug
   # resume reading the previously created tempfiles
   gcs.instance_eval do
-    begin
-      loop.with_index do |_, i|
-        @tmp_files << GCS::LargeWriter::TempFile.new(@tmp_path % (@tmp_files.count + 1))
-      end
-    rescue
+    loop do
+      path = @tmp_path % (@tmp_files.count + 1)
+      break unless File.exists? path
+      @tmp_files << GCS::LargeWriter::TempFile.new(path)
     end
   end
 
